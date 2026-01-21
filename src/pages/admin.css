@@ -1,0 +1,45 @@
+.admin-page {
+  min-height: 100vh;
+  background: linear-gradient(120deg, #0a5c36, #cfa30a);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.admin-box {
+  background: #fff;
+  padding: 35px;
+  width: 100%;
+  max-width: 420px;
+  border-radius: 12px;
+  text-align: center;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.25);
+}
+
+.admin-box h1 {
+  color: #0a5c36;
+}
+
+.admin-box input, .admin-box select {
+  width: 100%;
+  padding: 12px;
+  margin: 8px 0;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+}
+
+.admin-box button {
+  width: 100%;
+  padding: 12px;
+  background: #cfa30a;
+  border: none;
+  border-radius: 6px;
+  margin-top: 10px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.msg {
+  margin-top: 10px;
+  font-weight: bold;
+}
