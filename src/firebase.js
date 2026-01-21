@@ -3,23 +3,18 @@ import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth"
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCcpJuBrF8PMOnqSAe4r-ENfjseA10LRok",
-  authDomain: "hospital-mali.firebaseapp.com",
-  projectId: "hospital-mali",
-  storageBucket: "hospital-mali.appspot.com",
-  messagingSenderId: "195459769660",
-  appId: "1:195459769660:web:c04660b7eaaf2ed29d2a39"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
-// Set persistence to LOCAL so user stays logged in after refresh
 setPersistence(auth, browserLocalPersistence)
-  .then(() => {
-    console.log("✅ Auth persistence set to LOCAL");
-  })
-  .catch((error) => {
-    console.error("❌ Error setting persistence:", error);
-  });
+  .then(() => console.log("✅ Auth persistence set to LOCAL"))
+  .catch((error) => console.error("❌ Error setting persistence:", error));
