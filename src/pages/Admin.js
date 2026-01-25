@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { db, auth } from "../firebase";
 import { collection, getDocs, doc, updateDoc, getDoc, deleteDoc, addDoc, query, where, orderBy, limit } from "firebase/firestore";
 import { signOut } from "firebase/auth";
@@ -24,46 +24,7 @@ export default function AdminPanel() {
   
   const nav = useNavigate();
 
-  useEffect(() => {
-    checkAuthAndLoad();
-  }, []);
-
-  useEffect(() => {
-    if (activeTab === "statistics") loadStatistics();
-    else if (activeTab === "logs") loadLogs();
-  }, [activeTab, selectedYear]);
-
-  const checkAuthAndLoad = async () => {
-    if (!auth.currentUser) {
-      nav("/");
-      return;
-    }
-    try {
-      const userDoc = await getDoc(doc(db, "users", auth.currentUser.uid));
-      const userData = userDoc.data();
-      setCurrentUser(userData);
-      await updateDoc(doc(db, "users", auth.currentUser.uid), {
-        lastLoginAt: new Date().toISOString()
-      });
-      if (userData?.role !== "admin") {
-        setMsg("❌ Accès refusé. Administrateurs seulement.");
-        setTimeout(() => nav("/"), 2000);
-        return;
-      }
-      if (!userData?.approved) {
-        setMsg("❌ Votre compte administrateur n'est pas encore approuvé.");
-        setTimeout(() => nav("/"), 2000);
-        return;
-      }
-      await loadUsers();
-    } catch (err) {
-      console.error("Error loading:", err);
-      setMsg("❌ Erreur: " + err.message);
-      setLoading(false);
-    }
-  };
-
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     try {
       const usersSnap = await getDocs(collection(db, "users"));
       const usersList = usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -74,7 +35,112 @@ export default function AdminPanel() {
       setMsg("❌ Erreur de chargement des utilisateurs: " + err.message);
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const checkAuthAndLoad = async () => {
+      if (!auth.currentUser) {
+        nav("/");
+        return;
+      }
+      try {
+        const userDoc = await getDoc(doc(db, "users", auth.currentUser.uid));
+        const userData = userDoc.data();
+        setCurrentUser(userData);
+        await updateDoc(doc(db, "users", auth.currentUser.uid), {
+          lastLoginAt: new Date().toISOString()
+        });
+        if (userData?.role !== "admin") {
+          setMsg("❌ Accès refusé. Administrateurs seulement.");
+          setTimeout(() => nav("/"), 2000);
+          return;
+        }
+        if (!userData?.approved) {
+          setMsg("❌ Votre compte administrateur n'est pas encore approuvé.");
+          setTimeout(() => nav("/"), 2000);
+          return;
+        }
+        await loadUsers();
+      } catch (err) {
+        console.error("Error loading:", err);
+        setMsg("❌ Erreur: " + err.message);
+        setLoading(false);
+      }
+    };
+
+    checkAuthAndLoad();
+  }, [nav, loadUsers]);
+
+  useEffect(() => {
+    const loadStatistics = async () => {
+      setStatsLoading(true);
+      try {
+        const startOfYear = new Date(`${selectedYear}-01-01T00:00:00`);
+        const endOfYear = new Date(`${selectedYear}-12-31T23:59:59`);
+
+        const ticketsQuery = query(
+          collection(db, "tickets"),
+          where("createdAt", ">=", startOfYear.toISOString()),
+          where("createdAt", "<=", endOfYear.toISOString())
+        );
+
+        const ticketsSnap = await getDocs(ticketsQuery);
+        const tickets = ticketsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        const doctorsQuery = query(collection(db, "users"), where("role", "==", "doctor"));
+        const doctorsSnap = await getDocs(doctorsQuery);
+        const doctors = doctorsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        const deptStats = {};
+        tickets.forEach(ticket => {
+          const dept = ticket.department || "Non spécifié";
+          if (!deptStats[dept]) deptStats[dept] = { total: 0, waiting: 0, inProgress: 0, completed: 0 };
+          deptStats[dept].total++;
+          if (ticket.status === "waiting") deptStats[dept].waiting++;
+          if (ticket.status === "in-progress") deptStats[dept].inProgress++;
+          if (ticket.status === "completed") deptStats[dept].completed++;
+        });
+
+        const byDepartment = Object.entries(deptStats).map(([name, data]) => ({
+          name, ...data, completionRate: data.total > 0 ? ((data.completed / data.total) * 100).toFixed(1) : 0
+        }));
+
+        const doctorStats = doctors.map(doctor => {
+          const doctorTickets = tickets.filter(t => t.department === doctor.department);
+          const completed = doctorTickets.filter(t => t.status === "completed" && t.updatedBy === doctor.id).length;
+          return {
+            id: doctor.id, name: `Dr. ${doctor.firstName} ${doctor.lastName}`,
+            department: doctor.department || "Non assigné", room: doctor.room || "-",
+            totalInDept: doctorTickets.length, completed,
+            completionRate: doctorTickets.length > 0 ? ((completed / doctorTickets.length) * 100).toFixed(1) : 0
+          };
+        });
+
+        setStats({ byDepartment, byDoctor: doctorStats.sort((a, b) => b.completed - a.completed), monthly: tickets });
+        setStatsLoading(false);
+      } catch (error) {
+        console.error("Error loading statistics:", error);
+        setStatsLoading(false);
+      }
+    };
+
+    const loadLogs = async () => {
+      setLogsLoading(true);
+      try {
+        const logsQuery = query(collection(db, "adminLogs"), orderBy("timestamp", "desc"), limit(100));
+        const logsSnap = await getDocs(logsQuery);
+        const logsList = logsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setLogs(logsList);
+        setLogsLoading(false);
+      } catch (error) {
+        console.error("Error loading logs:", error);
+        setLogsLoading(false);
+      }
+    };
+
+    if (activeTab === "statistics") loadStatistics();
+    else if (activeTab === "logs") loadLogs();
+  }, [activeTab, selectedYear]);
 
   const logAdminAction = async (action, targetUserId, targetUserName, details = {}) => {
     try {
@@ -206,72 +272,6 @@ export default function AdminPanel() {
     }
   };
 
-  const loadStatistics = async () => {
-    setStatsLoading(true);
-    try {
-      const startOfYear = new Date(`${selectedYear}-01-01T00:00:00`);
-      const endOfYear = new Date(`${selectedYear}-12-31T23:59:59`);
-
-      const ticketsQuery = query(
-        collection(db, "tickets"),
-        where("createdAt", ">=", startOfYear.toISOString()),
-        where("createdAt", "<=", endOfYear.toISOString())
-      );
-
-      const ticketsSnap = await getDocs(ticketsQuery);
-      const tickets = ticketsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-      const doctorsQuery = query(collection(db, "users"), where("role", "==", "doctor"));
-      const doctorsSnap = await getDocs(doctorsQuery);
-      const doctors = doctorsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-      const deptStats = {};
-      tickets.forEach(ticket => {
-        const dept = ticket.department || "Non spécifié";
-        if (!deptStats[dept]) deptStats[dept] = { total: 0, waiting: 0, inProgress: 0, completed: 0 };
-        deptStats[dept].total++;
-        if (ticket.status === "waiting") deptStats[dept].waiting++;
-        if (ticket.status === "in-progress") deptStats[dept].inProgress++;
-        if (ticket.status === "completed") deptStats[dept].completed++;
-      });
-
-      const byDepartment = Object.entries(deptStats).map(([name, data]) => ({
-        name, ...data, completionRate: data.total > 0 ? ((data.completed / data.total) * 100).toFixed(1) : 0
-      }));
-
-      const doctorStats = doctors.map(doctor => {
-        const doctorTickets = tickets.filter(t => t.department === doctor.department);
-        const completed = doctorTickets.filter(t => t.status === "completed" && t.updatedBy === doctor.id).length;
-        return {
-          id: doctor.id, name: `Dr. ${doctor.firstName} ${doctor.lastName}`,
-          department: doctor.department || "Non assigné", room: doctor.room || "-",
-          totalInDept: doctorTickets.length, completed,
-          completionRate: doctorTickets.length > 0 ? ((completed / doctorTickets.length) * 100).toFixed(1) : 0
-        };
-      });
-
-      setStats({ byDepartment, byDoctor: doctorStats.sort((a, b) => b.completed - a.completed), monthly: tickets });
-      setStatsLoading(false);
-    } catch (error) {
-      console.error("Error loading statistics:", error);
-      setStatsLoading(false);
-    }
-  };
-
-  const loadLogs = async () => {
-    setLogsLoading(true);
-    try {
-      const logsQuery = query(collection(db, "adminLogs"), orderBy("timestamp", "desc"), limit(100));
-      const logsSnap = await getDocs(logsQuery);
-      const logsList = logsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setLogs(logsList);
-      setLogsLoading(false);
-    } catch (error) {
-      console.error("Error loading logs:", error);
-      setLogsLoading(false);
-    }
-  };
-
   const handleLogout = async () => {
     await signOut(auth);
     nav("/");
@@ -325,8 +325,6 @@ export default function AdminPanel() {
         <img src="/Mali.jpg" alt="Logo" style={{ height: 60 }} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30, paddingBottom: 20, borderBottom: '3px solid #228B22' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-            
-
             <div>
               <h1 style={{ margin: 0, color: '#228B22' }}>🏥 Panneau d'Administration</h1>
               <p style={{ color: '#666', margin: '5px 0 0 0' }}>Bienvenue, {currentUser?.firstName} {currentUser?.lastName}</p>
