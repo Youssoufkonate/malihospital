@@ -17,6 +17,67 @@ export default function Accueil() {
   const nav = useNavigate();
 
   useEffect(() => {
+    const loadUserData = async () => {
+      try {
+        const userSnap = await getDoc(doc(db, "users", auth.currentUser.uid));
+        if (!userSnap.exists()) {
+          alert("❌ Données utilisateur introuvables. Veuillez vous réinscrire.");
+          await signOut(auth);
+          nav("/");
+          return;
+        }
+
+        const data = userSnap.data();
+        setUserData(data);
+
+        // Update last login
+        await updateDoc(doc(db, "users", auth.currentUser.uid), {
+          lastLoginAt: new Date().toISOString()
+        });
+
+        // Check if disabled
+        if (data.disabled) {
+          alert("❌ Votre compte a été désactivé. Contactez l'administrateur.");
+          await signOut(auth);
+          nav("/");
+          return;
+        }
+
+        if (!data.approved) return;
+
+        if (data.role !== "accueil") {
+          alert("❌ Accès refusé.");
+          await signOut(auth);
+          nav("/");
+          return;
+        }
+
+        loadTickets();
+      } catch (e) {
+        alert("Erreur de chargement des données: " + e.message);
+      }
+    };
+
+    const loadTickets = () => {
+      const q = query(collection(db, "tickets"), orderBy("createdAt", "desc"));
+      onSnapshot(q, snapshot => {
+        const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        // Filter tickets from last 24 hours
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const recentTickets = list.filter(t => new Date(t.createdAt) > twentyFourHoursAgo);
+        setTickets(recentTickets);
+      });
+    };
+
+    const checkAuth = async () => {
+      if (!auth.currentUser) {
+        nav("/");
+        return;
+      }
+      await loadUserData();
+      setPageLoading(false);
+    };
+
     const unsubscribe = auth.onAuthStateChanged((user) => {
       if (user) {
         checkAuth();
@@ -27,67 +88,6 @@ export default function Accueil() {
 
     return () => unsubscribe();
   }, [nav]);
-
-  const checkAuth = async () => {
-    if (!auth.currentUser) {
-      nav("/");
-      return;
-    }
-    await loadUserData();
-    setPageLoading(false);
-  };
-
-  const loadUserData = async () => {
-    try {
-      const userSnap = await getDoc(doc(db, "users", auth.currentUser.uid));
-      if (!userSnap.exists()) {
-        alert("❌ Données utilisateur introuvables. Veuillez vous réinscrire.");
-        await signOut(auth);
-        nav("/");
-        return;
-      }
-
-      const data = userSnap.data();
-      setUserData(data);
-
-      // Update last login
-      await updateDoc(doc(db, "users", auth.currentUser.uid), {
-        lastLoginAt: new Date().toISOString()
-      });
-
-      // Check if disabled
-      if (data.disabled) {
-        alert("❌ Votre compte a été désactivé. Contactez l'administrateur.");
-        await signOut(auth);
-        nav("/");
-        return;
-      }
-
-      if (!data.approved) return;
-
-      if (data.role !== "accueil") {
-        alert("❌ Accès refusé.");
-        await signOut(auth);
-        nav("/");
-        return;
-      }
-
-      loadTickets();
-    } catch (e) {
-      alert("Erreur de chargement des données: " + e.message);
-    }
-  };
-
-  const loadTickets = () => {
-    const q = query(collection(db, "tickets"), orderBy("createdAt", "desc"));
-    onSnapshot(q, snapshot => {
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      // Filter tickets from last 24 hours
-      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const recentTickets = list.filter(t => new Date(t.createdAt) > twentyFourHoursAgo);
-      setTickets(recentTickets);
-    });
-  };
 
   const createTicket = async () => {
     if (!name || !age) return alert("Veuillez remplir le nom et l'âge du patient");
