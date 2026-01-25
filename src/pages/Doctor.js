@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { auth, db } from "../firebase";
 import { collection, doc, updateDoc, getDoc, query, where, addDoc, onSnapshot } from "firebase/firestore";
 import { signOut } from "firebase/auth";
@@ -14,75 +14,7 @@ export default function Doctor() {
   const [filterStatus, setFilterStatus] = useState("all");
   const nav = useNavigate();
 
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      if (user) {
-        checkAuthAndLoad();
-      } else {
-        nav("/");
-      }
-    });
-
-    return () => unsubscribe();
-  }, [nav]);
-
-  const checkAuthAndLoad = async () => {
-    if (!auth.currentUser) {
-      nav("/");
-      return;
-    }
-
-    try {
-      const userSnap = await getDoc(doc(db, "users", auth.currentUser.uid));
-      
-      if (!userSnap.exists()) {
-        alert("❌ Données utilisateur introuvables.");
-        await signOut(auth);
-        nav("/");
-        return;
-      }
-
-      const user = userSnap.data();
-      setUserData(user);
-
-      console.log("👤 Doctor User Data:", user);
-      console.log("🏥 Doctor Department:", user.department);
-
-      if (user.disabled) {
-        alert("❌ Votre compte a été désactivé. Contactez l'administrateur.");
-        await signOut(auth);
-        nav("/");
-        return;
-      }
-
-      if (!user.approved) {
-        setPageLoading(false);
-        return;
-      }
-
-      if (user.role !== "doctor") {
-        alert("❌ Accès refusé. Cette page est réservée aux médecins.");
-        await signOut(auth);
-        nav("/");
-        return;
-      }
-
-      if (!user.department) {
-        alert("❌ Votre compte n'a pas de département assigné. Contactez l'administrateur.");
-        setPageLoading(false);
-        return;
-      }
-
-      loadTickets(user);
-      setPageLoading(false);
-    } catch (e) {
-      console.error("Error loading user data:", e);
-      alert("Erreur de chargement des données: " + e.message);
-      setPageLoading(false);
-    }
-  };
-
-  const loadTickets = (user) => {
+  const loadTickets = useCallback((user) => {
     setLoading(true);
     
     console.log("🔍 Querying tickets for department:", user.department);
@@ -113,7 +45,75 @@ export default function Doctor() {
     );
 
     return () => unsubscribe();
-  };
+  }, []);
+
+  useEffect(() => {
+    const checkAuthAndLoad = async () => {
+      if (!auth.currentUser) {
+        nav("/");
+        return;
+      }
+
+      try {
+        const userSnap = await getDoc(doc(db, "users", auth.currentUser.uid));
+        
+        if (!userSnap.exists()) {
+          alert("❌ Données utilisateur introuvables.");
+          await signOut(auth);
+          nav("/");
+          return;
+        }
+
+        const user = userSnap.data();
+        setUserData(user);
+
+        console.log("👤 Doctor User Data:", user);
+        console.log("🏥 Doctor Department:", user.department);
+
+        if (user.disabled) {
+          alert("❌ Votre compte a été désactivé. Contactez l'administrateur.");
+          await signOut(auth);
+          nav("/");
+          return;
+        }
+
+        if (!user.approved) {
+          setPageLoading(false);
+          return;
+        }
+
+        if (user.role !== "doctor") {
+          alert("❌ Accès refusé. Cette page est réservée aux médecins.");
+          await signOut(auth);
+          nav("/");
+          return;
+        }
+
+        if (!user.department) {
+          alert("❌ Votre compte n'a pas de département assigné. Contactez l'administrateur.");
+          setPageLoading(false);
+          return;
+        }
+
+        loadTickets(user);
+        setPageLoading(false);
+      } catch (e) {
+        console.error("Error loading user data:", e);
+        alert("Erreur de chargement des données: " + e.message);
+        setPageLoading(false);
+      }
+    };
+
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        checkAuthAndLoad();
+      } else {
+        nav("/");
+      }
+    });
+
+    return () => unsubscribe();
+  }, [nav, loadTickets]);
 
   const updateStatus = async (ticketId, newStatus) => {
     try {
