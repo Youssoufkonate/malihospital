@@ -1,0 +1,44 @@
+body {
+  margin: 0;
+  font-family: 'Segoe UI', sans-serif;
+  background: #f4efe4;
+}
+
+.screen {
+  padding: 40px;
+  text-align: center;
+}
+
+.accueil { background: #0a5c36; color: white; }
+.doctor { background: #fff3cd; }
+.display { background: #8b1c1c; color: #fff; }
+
+button {
+  background: #cfa30a;
+  border: none;
+  padding: 12px 24px;
+  font-size: 18px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+select {
+  padding: 10px;
+  font-size: 16px;
+  margin-bottom: 20px;
+}
+
+.card {
+  background: #fff;
+  padding: 15px;
+  margin: 10px auto;
+  max-width: 300px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.big-ticket {
+  font-size: 100px;
+  margin-top: 40px;
+  font-weight: bold;
+}

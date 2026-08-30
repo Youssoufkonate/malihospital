@@ -1,0 +1,578 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() { return request.auth != null; }
+
+    function myData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function myRole() { return isSignedIn() ? myData().role : null; }
+    function myHospital() { return isSignedIn() ? myData().hospitalId : null; }
+
+    // A disabled or not-yet-approved account should lose write/read access
+    // immediately, even if their role/hospitalId would otherwise match.
+    function isActive() {
+      return isSignedIn() && myData().disabled != true && myData().approved == true;
+    }
+
+    function isSuperAdmin() { return isSignedIn() && myRole() == "superadmin" && isActive(); }
+    function isHospitalAdminOf(hid) { return isSignedIn() && myRole() == "hospitaladmin" && myHospital() == hid && isActive(); }
+    // Any authenticated, active staff member of hospital `hid` — admin,
+    // doctor, nurse, receptionist, department supervisor, pharmacy, or lab.
+    function isStaffOf(hid) {
+      return isSignedIn() && myHospital() == hid && myRole() in ["hospitaladmin", "doctor", "nurse", "accueil", "supervisor", "pharmacy", "lab"] && isActive();
+    }
+
+    // ---------------------------------------------------------------
+    // Bootstrap flag: lets Signup.jsx know whether the first Super Admin
+    // has already been created. Writable only during that one-time bootstrap
+    // (or later by a Super Admin, though nothing should need to touch it again).
+    // ---------------------------------------------------------------
+    match /config/setup {
+      allow get: if true;
+      allow create: if !exists(/databases/$(database)/documents/config/setup);
+      allow update, delete: if isSuperAdmin();
+    }
+
+    // ---------------------------------------------------------------
+    // Hospitals
+    // ---------------------------------------------------------------
+    match /hospitals/{hospitalId} {
+      // Public read so the no-login waiting-room screen can validate the
+      // hospitalId in its URL and show the hospital's name.
+      allow read: if true;
+      // Create and delete now happen ONLY via Cloud Functions
+      // (createHospital / deleteHospital), which also create/delete the
+      // admin's actual Firebase Auth login and (for delete) cascade to
+      // every user/ticket/call atomically in batches — something a direct
+      // client write could never safely guarantee. No client `create` or
+      // `delete` permission is granted here on purpose.
+      allow update: if isSuperAdmin() || isHospitalAdminOf(hospitalId);
+    }
+
+    // ---------------------------------------------------------------
+    // Users
+    // ---------------------------------------------------------------
+    match /users/{uid} {
+      allow read: if isSuperAdmin()
+        || (isSignedIn() && request.auth.uid == uid)
+        || (isSignedIn() && myRole() == "hospitaladmin" && resource.data.hospitalId == myHospital())
+        // A department supervisor can see (read-only) the doctors/nurses in
+        // their own department — needed for Supervisor.jsx's "Personnel"
+        // and "Planning" tabs. They still can't create/edit/disable staff;
+        // that stays exclusively a hospitaladmin/superadmin action via the
+        // Cloud Functions.
+        || (isSignedIn() && myRole() == "supervisor" && isActive()
+            && resource.data.hospitalId == myHospital()
+            && resource.data.department == myData().department)
+        // A hospital admin can read the staff of a facility (pharmacy/lab)
+        // THEY own — checked against the facility doc's own hospitalId,
+        // not trusted from the user doc itself.
+        || (isSignedIn() && myRole() == "hospitaladmin" && isActive()
+            && resource.data.facilityType in ["pharmacy", "lab"]
+            && get(/databases/$(database)/documents/$(resource.data.facilityType == "pharmacy" ? "pharmacies" : "labs")/$(resource.data.facilityId)).data.hospitalId == myHospital())
+        // A facility admin reads their own facility's staff directly —
+        // no cross-document lookup needed since it's just their own
+        // facilityId, taken from their own profile.
+        || (isSignedIn() && myRole() == "facilityadmin" && isActive()
+            && resource.data.get('facilityId', null) == myData().facilityId);
+
+      // Bootstrap: the very first user ever (before config/setup exists)
+      // can create their own superadmin doc directly — there's no other
+      // way to get a first authorized caller before any account exists.
+      // Every other account creation now happens via Cloud Functions
+      // (createHospital for hospitaladmins, createStaffAccount for
+      // doctor/nurse/accueil), which also creates the real Firebase Auth
+      // login in the same operation — a direct client write here could
+      // only ever create the Firestore profile half of that.
+      allow create: if
+        (!exists(/databases/$(database)/documents/config/setup) && request.auth.uid == uid && request.resource.data.role == "superadmin");
+
+      allow update: if isSuperAdmin()
+        // Users may update their own non-sensitive fields (not role/hospital,
+        // and not passwordHistory/passwordLastChangedAt — those exist
+        // specifically to stop password reuse, so a client being able to
+        // directly rewrite them would let someone just wipe their own
+        // history to bypass the check. They're only ever set by the
+        // recordPasswordChange Cloud Function, using the Admin SDK, which
+        // bypasses this rule entirely.
+        // This also covers a doctor/nurse flipping their own online/lastLoginAt/
+        // lastLogoutAt fields on login and logout.
+        || (isSignedIn() && request.auth.uid == uid
+            && request.resource.data.role == resource.data.role
+            && request.resource.data.hospitalId == resource.data.hospitalId
+            && request.resource.data.get('passwordHistory', null) == resource.data.get('passwordHistory', null)
+            && request.resource.data.get('passwordLastChangedAt', null) == resource.data.get('passwordLastChangedAt', null))
+        // Hospital admins may still directly edit their own staff's other
+        // fields (department/room via "Modifier" in AdminPanel) — that
+        // wasn't part of the Cloud Functions migration. Disabling/enabling
+        // now goes through setStaffDisabled instead (it also needs to sync
+        // the person's Auth-level lock, which only a Function can do), but
+        // this broader update permission is left in place so the rest of
+        // the edit flow keeps working.
+        || (isHospitalAdminOf(resource.data.hospitalId)
+            && resource.data.role in ["doctor", "nurse", "accueil", "supervisor", "pharmacy", "lab"]
+            && request.resource.data.hospitalId == myHospital()
+            && request.resource.data.role in ["doctor", "nurse", "accueil", "supervisor", "pharmacy", "lab"]);
+
+      // No client `delete` permission — deleteStaffAccount and
+      // deleteHospital (Cloud Functions) are the only paths that remove a
+      // user doc now, because only they can also delete the person's
+      // actual Firebase Auth login in the same operation.
+    }
+
+    // ---------------------------------------------------------------
+    // Tickets — the core isolation boundary.
+    // ---------------------------------------------------------------
+    match /tickets/{ticketId} {
+      allow read: if isSuperAdmin() || isStaffOf(resource.data.hospitalId);
+      // Only reception/admin create tickets. Nurses and doctors only ever
+      // update an existing ticket (vitals, status transitions, consultation
+      // fields) — never create one from scratch.
+      allow create: if isSignedIn() && isActive()
+        && myRole() in ["accueil", "hospitaladmin"]
+        && request.resource.data.hospitalId == myHospital();
+      // Nurses write vitals + the waiting -> ready transition here; doctors
+      // write consultation timer fields (consultationStartedAt/EndedAt/
+      // DurationSeconds, consultationDoctorId/Name) and no-show fields —
+      // already covered since any staff member of the hospital can update
+      // its own tickets.
+      allow update: if isSuperAdmin() || isStaffOf(resource.data.hospitalId);
+      allow delete: if isSuperAdmin() || isHospitalAdminOf(resource.data.hospitalId);
+    }
+
+    // ---------------------------------------------------------------
+    // Calls — public read (unauthenticated waiting-room screens). Writes
+    // now happen ONLY via the callNextPatient Cloud Function, which
+    // re-checks the department match and the nurse-triage ("ready")
+    // status gate server-side before writing — checks a direct client
+    // write could bypass entirely (e.g. from the browser console). No
+    // client `create` permission is granted here on purpose. update/delete
+    // are left as-is since nothing in the app currently touches an
+    // existing call doc after it's written; tell me if you want those
+    // locked down too.
+    // ---------------------------------------------------------------
+    match /calls/{callId} {
+      allow read: if true;
+      allow update, delete: if isSuperAdmin() || isStaffOf(resource.data.hospitalId);
+    }
+
+    // ---------------------------------------------------------------
+    // Doctor login/logout sessions — written by the doctor themselves
+    // (one doc per login, closed out with logoutAt on Déconnexion), read
+    // by the hospital admin (and super admin) to show who's active and
+    // their connection history.
+    // ---------------------------------------------------------------
+    match /doctorSessions/{sessionId} {
+      allow read: if isSuperAdmin() || isStaffOf(resource.data.hospitalId);
+      allow create: if isSignedIn() && isActive()
+        && myRole() == "doctor"
+        && request.resource.data.doctorId == request.auth.uid
+        && request.resource.data.hospitalId == myHospital();
+      // Only the doctor who opened the session can close it out (set logoutAt).
+      allow update: if isSignedIn() && isActive()
+        && myRole() == "doctor"
+        && resource.data.doctorId == request.auth.uid;
+      allow delete: if isSuperAdmin() || isHospitalAdminOf(resource.data.hospitalId);
+    }
+
+    // ---------------------------------------------------------------
+    // Logs
+    // ---------------------------------------------------------------
+    match /adminLogs/{logId} {
+      allow read: if isSuperAdmin()
+        || (isSignedIn() && myRole() == "hospitaladmin" && resource.data.hospitalId == myHospital());
+      allow create: if isSignedIn() && isActive() && myRole() == "hospitaladmin" && request.resource.data.hospitalId == myHospital();
+    }
+
+    match /superAdminLogs/{logId} {
+      allow read, create: if isSuperAdmin();
+    }
+
+    // ---------------------------------------------------------------
+    // Broadcast notifications — in-app notices staff see on their
+    // dashboards. Written ONLY by the broadcastNotification Cloud
+    // Function (Admin SDK bypasses these rules entirely for that write);
+    // no client `create`/`update`/`delete` is granted, so a broadcast can
+    // only ever come from that function, not a direct client write.
+    // hospitalId == null means a super-admin, hospital-wide broadcast —
+    // but ONLY when targetUserId is also unset. A personal notification
+    // to a facility staff member (pharmacy/lab/facilityadmin) also has
+    // hospitalId == null, since those roles aren't hospital-scoped at
+    // all — without the targetUserId == null guard here, that combination
+    // would satisfy this branch for literally anyone signed in, not just
+    // the intended recipient. The dedicated targetUserId branch below is
+    // what actually scopes a personal notification correctly.
+    // ---------------------------------------------------------------
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && isActive()
+        && ((resource.data.hospitalId == null && resource.data.get('targetUserId', null) == null)
+            || myRole() == "superadmin"
+            || resource.data.get('targetUserId', null) == request.auth.uid
+            || (resource.data.hospitalId != null && resource.data.hospitalId == myHospital()
+                && (resource.data.get('department', null) == null || resource.data.get('department', null) == myData().department)));
+    }
+
+    // ---------------------------------------------------------------
+    // Patients — Phase 1 of the full platform build. Scoped to a single
+    // hospital: a patient registered at Hospital A is invisible to
+    // Hospital B (your explicit decision — not a shared platform-wide
+    // record). Create happens ONLY via the registerPatient Cloud Function,
+    // which generates the human-readable patientId (PAT-000001, etc.)
+    // inside an atomic Firestore transaction — a direct client write could
+    // never safely guarantee two receptionists registering patients at the
+    // same moment don't collide on the same ID. Update is left open to any
+    // staff member of the hospital (correcting a phone number, adding a
+    // newly-discovered allergy, etc.) — no delete permission anywhere,
+    // matching "medical records should never be lost."
+    // ---------------------------------------------------------------
+    match /patients/{patientDocId} {
+      allow read: if isSuperAdmin() || isStaffOf(resource.data.hospitalId);
+      allow update: if isSuperAdmin() || isStaffOf(resource.data.hospitalId);
+    }
+
+    // ---------------------------------------------------------------
+    // Ticket number counters — one doc per (hospital, department, day),
+    // incremented inside the same client-side transaction that creates
+    // the ticket (see Accueil.jsx createTicket), guaranteeing two
+    // receptionists creating tickets at the same moment never get the
+    // same ticket number. Deliberately kept as a direct client write
+    // (not a Cloud Function) since a counter value on its own isn't
+    // sensitive data — read is role-gated only (not hospital-scoped,
+    // since the very first read of a brand-new counter doc has no
+    // existing data to check hospitalId against); writes are.
+    // ---------------------------------------------------------------
+    match /ticketCounters/{counterId} {
+      allow read: if isSignedIn() && isActive() && myRole() in ["accueil", "hospitaladmin"];
+      allow create, update: if isSignedIn() && isActive()
+        && myRole() in ["accueil", "hospitaladmin"]
+        && request.resource.data.hospitalId == myHospital();
+    }
+
+    // ---------------------------------------------------------------
+    // Schedules — Phase 6, extended to facilities. One doc per shift
+    // assignment. Two independent scoping modes on the same collection:
+    //   - hospital/department mode (hospitalId + department set): a
+    //     supervisor manages shifts within their OWN department only.
+    //   - facility mode (facilityType + facilityId set instead): a
+    //     facility admin manages shifts within their OWN facility only.
+    // Both check against the caller's own profile, never a client-
+    // supplied value, so nobody can assign shifts into a department/
+    // facility they don't run.
+    // ---------------------------------------------------------------
+    match /schedules/{scheduleId} {
+      allow read: if isSuperAdmin()
+        || (resource.data.get('hospitalId', null) != null && isHospitalAdminOf(resource.data.hospitalId))
+        || (resource.data.get('hospitalId', null) != null && isStaffOf(resource.data.hospitalId) && myData().department == resource.data.department)
+        || (resource.data.get('facilityId', null) != null && myData().facilityId == resource.data.facilityId);
+
+      allow create: if isSignedIn() && isActive() && (
+        (myRole() == "supervisor"
+          && request.resource.data.hospitalId == myHospital()
+          && request.resource.data.department == myData().department)
+        || (myRole() == "facilityadmin"
+          && request.resource.data.facilityId == myData().facilityId
+          && request.resource.data.facilityType == myData().facilityType)
+      );
+
+      allow update, delete: if isSignedIn() && isActive() && (
+        (myRole() == "supervisor"
+          && resource.data.get('hospitalId', null) == myHospital() && resource.data.get('department', null) == myData().department
+          && (request.resource == null || (request.resource.data.hospitalId == myHospital() && request.resource.data.department == myData().department)))
+        || (myRole() == "facilityadmin"
+          && resource.data.get('facilityId', null) == myData().facilityId
+          && (request.resource == null || request.resource.data.facilityId == myData().facilityId))
+      );
+    }
+
+    // ---------------------------------------------------------------
+    // Pharmacies & Labs — standalone facility entities, structurally
+    // identical, hence identical rules for both. Read is intentionally
+    // NOT hospital-scoped: per your decision, every facility is publicly
+    // routable — a doctor at any hospital needs to search/browse ANY
+    // facility to find one matching their patient's location, regardless
+    // of which hospital (if any) created it. Only signed-in, active staff
+    // can read (not literally public/unauthenticated) — browsing this
+    // directory is a staff action, not a public one. No client
+    // create/update/delete — those happen exclusively through
+    // createFacility/setFacilityActive/deleteFacility (Cloud Functions),
+    // same reasoning as hospitals: only they can also create/lock/delete
+    // the facility's staff logins in the same atomic operation.
+    // ---------------------------------------------------------------
+    match /pharmacies/{facilityId} {
+      allow read: if isSignedIn() && isActive();
+    }
+    match /labs/{facilityId} {
+      allow read: if isSignedIn() && isActive();
+    }
+
+    // ---------------------------------------------------------------
+    // Prescriptions — a doctor writes one, it routes directly to a
+    // specific pharmacy. Create happens ONLY via createPrescription
+    // (Cloud Function), which re-validates the pharmacy is real and
+    // active rather than trusting the client. Status updates (pending ->
+    // preparing -> ready -> collected) are a routine, low-stakes write —
+    // kept as a direct client write by the target pharmacy's own staff,
+    // same reasoning as ticket status transitions.
+    // ---------------------------------------------------------------
+    match /prescriptions/{prescriptionId} {
+      allow read: if isSuperAdmin()
+        || isHospitalAdminOf(resource.data.hospitalId)
+        || (isSignedIn() && isActive() && myRole() == "doctor" && myHospital() == resource.data.hospitalId)
+        || (isSignedIn() && isActive() && myData().facilityType == "pharmacy" && myData().facilityId == resource.data.pharmacyId);
+
+      allow update: if isSignedIn() && isActive()
+        && myData().facilityType == "pharmacy" && myData().facilityId == resource.data.pharmacyId
+        && request.resource.data.pharmacyId == resource.data.pharmacyId; // can't reassign to a different pharmacy
+    }
+
+    // ---------------------------------------------------------------
+    // Inventory — each pharmacy maintains its OWN medicine list directly
+    // (no shared platform-wide catalog anymore — a pharmacy's list is
+    // exactly what they actually stock, entered by their own staff/admin,
+    // not a Super Admin-managed reference). Every field the original
+    // catalog had (generic name, brand names, ATC code, etc.) now lives
+    // directly on the inventory document, alongside stock tracking
+    // (quantity, minimum level, expiry). Managed by that facility's own
+    // pharmacy staff or facility admin — never another facility's,
+    // checked against the caller's own facilityId, not a client-supplied
+    // value.
+    // ---------------------------------------------------------------
+    match /inventory/{inventoryId} {
+      allow read: if isSuperAdmin()
+        // Doctors need to read a pharmacy's inventory to populate the
+        // medicine dropdown while writing a prescription — any active
+        // doctor, not just staff of that specific facility, since any
+        // hospital's doctor can route a prescription to any pharmacy.
+        || (isSignedIn() && isActive() && myRole() == "doctor")
+        || (isSignedIn() && isActive() && myData().facilityId == resource.data.facilityId);
+      allow create: if isSignedIn() && isActive()
+        && myRole() in ["pharmacy", "facilityadmin"]
+        && request.resource.data.facilityId == myData().facilityId
+        && request.resource.data.facilityType == myData().facilityType;
+      allow update: if isSignedIn() && isActive()
+        && myRole() in ["pharmacy", "facilityadmin"]
+        && resource.data.facilityId == myData().facilityId
+        && request.resource.data.facilityId == myData().facilityId; // can't reassign to another facility
+    }
+    // Atomic counter backing each facility's own Medicine ID sequence
+    // (MED-000001, etc., scoped per pharmacy — two pharmacies can each
+    // have their own "MED-000001", that's fine, it's just an internal
+    // per-pharmacy reference number).
+    match /inventoryCounters/{facilityId} {
+      allow read, write: if isSignedIn() && isActive()
+        && myRole() in ["pharmacy", "facilityadmin"]
+        && myData().facilityId == facilityId;
+    }
+
+    // ---------------------------------------------------------------
+    // Bed management — a room belongs to one department and holds one or
+    // more beds. Created by the hospital admin (any department) or a
+    // department supervisor (their OWN department only, checked against
+    // their own profile — they can't create a room for a department they
+    // don't run). Read by any staff of that hospital, so doctors/nurses
+    // can see availability while admitting a patient.
+    // ---------------------------------------------------------------
+    match /rooms/{roomId} {
+      allow read: if isSuperAdmin() || (isSignedIn() && isActive() && isStaffOf(resource.data.hospitalId));
+      allow create: if isSignedIn() && isActive() && (
+        (myRole() == "hospitaladmin" && request.resource.data.hospitalId == myHospital())
+        || (myRole() == "supervisor" && request.resource.data.hospitalId == myHospital() && request.resource.data.department == myData().department)
+      );
+      allow update, delete: if isSignedIn() && isActive() && (
+        (myRole() == "hospitaladmin" && resource.data.hospitalId == myHospital())
+        || (myRole() == "supervisor" && resource.data.hospitalId == myHospital() && resource.data.department == myData().department)
+      );
+    }
+
+    match /beds/{bedId} {
+      allow read: if isSuperAdmin() || (isSignedIn() && isActive() && isStaffOf(resource.data.hospitalId));
+      allow create: if isSignedIn() && isActive() && (
+        (myRole() == "hospitaladmin" && request.resource.data.hospitalId == myHospital())
+        || (myRole() == "supervisor" && request.resource.data.hospitalId == myHospital() && request.resource.data.department == myData().department)
+      );
+      allow update, delete: if isSignedIn() && isActive() && (
+        (myRole() == "hospitaladmin" && resource.data.hospitalId == myHospital())
+        || (myRole() == "supervisor" && resource.data.hospitalId == myHospital() && resource.data.department == myData().department)
+      );
+    }
+
+    // ---------------------------------------------------------------
+    // Hospital supply inventory (gloves, scissors, gauze — internal
+    // consumables, NOT the same thing as pharmacy medicine inventory,
+    // which is what a pharmacy sells to patients). department == null
+    // means hospital-wide/central stock, managed by the hospital admin;
+    // department set means that department's own stock, managed by its
+    // supervisor — same ownership split already used for rooms/beds.
+    // ---------------------------------------------------------------
+    match /supplyInventory/{itemId} {
+      allow read: if isSuperAdmin() || (isSignedIn() && isActive() && isStaffOf(resource.data.hospitalId));
+      allow create: if isSignedIn() && isActive() && (
+        (myRole() == "hospitaladmin" && request.resource.data.hospitalId == myHospital())
+        || (myRole() == "supervisor" && request.resource.data.hospitalId == myHospital() && request.resource.data.department == myData().department)
+      );
+      allow update, delete: if isSignedIn() && isActive() && (
+        (myRole() == "hospitaladmin" && resource.data.hospitalId == myHospital())
+        || (myRole() == "supervisor" && resource.data.hospitalId == myHospital() && resource.data.department == myData().department)
+      );
+    }
+
+    // ---------------------------------------------------------------
+    // Supply requests — any staff member can ask for materials, either
+    // from the hospital admin's central stock (targetDepartment == null)
+    // or from a specific department's own stock (targetDepartment set).
+    // Only the actual owner of that stock can respond: hospital admin for
+    // central requests, that department's own supervisor otherwise — the
+    // same ownership logic as the inventory itself. The requester can
+    // always read their own request regardless of who it's aimed at, so
+    // they can track its status.
+    // ---------------------------------------------------------------
+    match /supplyRequests/{requestId} {
+      allow read: if isSuperAdmin()
+        || (isSignedIn() && isActive() && resource.data.requesterId == request.auth.uid)
+        || (isSignedIn() && isActive() && myRole() == "hospitaladmin" && resource.data.hospitalId == myHospital())
+        || (isSignedIn() && isActive() && myRole() == "supervisor" && resource.data.hospitalId == myHospital() && resource.data.targetDepartment == myData().department);
+      allow create: if isSignedIn() && isActive()
+        && isStaffOf(request.resource.data.hospitalId)
+        && request.resource.data.requesterId == request.auth.uid;
+      allow update: if isSignedIn() && isActive() && (
+        (myRole() == "hospitaladmin" && resource.data.hospitalId == myHospital() && resource.data.targetDepartment == null)
+        || (myRole() == "supervisor" && resource.data.hospitalId == myHospital() && resource.data.targetDepartment == myData().department)
+      );
+    }
+
+    // ---------------------------------------------------------------
+    // Sessions — one doc per login, created directly by the client at
+    // sign-in time (device/browser label, hospitalId denormalized here
+    // specifically so a hospital admin can be granted revoke rights
+    // without a Cloud Function round-trip). Read/write happen directly
+    // rather than through a Cloud Function on purpose: a session revoke
+    // has to be visible to every other open browser/device INSTANTLY via
+    // a live listener, and direct Firestore access is what makes that
+    // simple and reliable — the alternative (a Cloud Function call from
+    // the revoking admin, then a separate poll from the revoked device)
+    // adds latency and complexity for no real security benefit, since
+    // the write itself is still fully rule-gated below.
+    //   - Anyone can create their OWN session at login.
+    //   - The session owner can read/update their own (heartbeat, or
+    //     revoking their own device from "Sessions actives").
+    //   - A hospital admin can read/revoke (update only, never delete)
+    //     sessions belonging to staff of THEIR hospital — the actual
+    //     "employee lost their laptop" scenario.
+    //   - Super admin can read/revoke anything.
+    // No delete permission anywhere — old sessions simply age out of the
+    // "active" view by lastActivityAt rather than being removed, so
+    // there's always a full history to look back on.
+    // ---------------------------------------------------------------
+    match /sessions/{sessionId} {
+      // resource is null when the document doesn't exist yet — which is
+      // EXACTLY the case the very first time a given browser/device logs
+      // in (SessionGuard checks for an existing session doc before
+      // deciding whether to create one).
+      //
+      // IMPORTANT distinction from a first attempt at this fix: simply
+      // requiring "resource != null" before the ownership check avoids
+      // the crash, but makes the WHOLE clause evaluate to false when the
+      // doc doesn't exist — and Firestore treats a false read rule as
+      // permission-denied, not "not found." That still blocked every
+      // non-superadmin from ever checking whether their own
+      // not-yet-created session existed. The actual fix: explicitly
+      // allow resource == null through (checking existence of your own
+      // potential session leaks nothing, since there's no data there
+      // yet) — ownership is only enforced once the document is real.
+      allow read: if isSuperAdmin()
+        || (isSignedIn() && (resource == null || resource.data.uid == request.auth.uid))
+        || (isSignedIn() && isActive() && myRole() == "hospitaladmin" && resource != null && resource.data.hospitalId == myHospital());
+      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+      allow update: if isSignedIn() && (
+        resource.data.uid == request.auth.uid
+        || (isActive() && myRole() == "hospitaladmin" && resource.data.hospitalId == myHospital())
+        || isSuperAdmin()
+      );
+    }
+
+    // ---------------------------------------------------------------
+    // Device registration — scoped to hospital-affiliated staff only
+    // (doctor/nurse/accueil/supervisor/hospitaladmin), not facility roles
+    // or superadmin, matching the actual ask ("useful for your hospital
+    // deployment"). One active device per account: the first device seen
+    // for a given account auto-registers; a login attempt from a second,
+    // different device while an active one already exists gets blocked
+    // client-side (see SessionGuard) until a hospital admin revokes the
+    // old one, which then lets the next device register in its place.
+    // Same "read == null must be explicitly allowed" lesson as sessions
+    // above: resource == null (not-yet-registered) has to read as
+    // permitted, not denied, or nobody could ever check whether their
+    // own device is already registered.
+    // ---------------------------------------------------------------
+    match /devices/{deviceId} {
+      // resource == null must read as permitted (not denied) — see the
+      // sessions collection above for why: checking whether your own
+      // not-yet-existing device record exists has to succeed even though
+      // there's nothing there yet.
+      allow read: if isSuperAdmin()
+        || (isSignedIn() && (resource == null || resource.data.userId == request.auth.uid))
+        || (isSignedIn() && isActive() && myRole() == "hospitaladmin" && resource != null && resource.data.hospitalId == myHospital());
+
+      // A device can only ever be SELF-created as "pending" — never
+      // active. Auto-registering yourself as approved would defeat the
+      // entire point of manual approval. The actual approval (flipping
+      // to active) only ever happens via the update rule below, by
+      // someone who isn't the device's own owner.
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == "pending";
+
+      // Approval / revocation. Deliberately asymmetric: a hospital admin
+      // can approve/revoke devices for THEIR hospital's staff, but
+      // explicitly NOT for a hospitaladmin-role device (even at their
+      // own hospital) — that tier is superadmin-only, matching "super
+      // admin registers the hospital admin device manually." The device
+      // owner can still update their own record for non-status fields
+      // (e.g. lastSeen heartbeat) but can't self-approve — the status
+      // check on create already prevents that path, and this update
+      // rule doesn't grant the owner any special status-changing power
+      // beyond what create already established.
+      allow update: if isSignedIn() && (
+        (resource.data.userId == request.auth.uid && request.resource.data.status == resource.data.status)
+        || (isActive() && myRole() == "hospitaladmin" && resource.data.hospitalId == myHospital() && resource.data.role != "hospitaladmin")
+        || isSuperAdmin()
+      );
+    }
+
+    // ---------------------------------------------------------------
+    // Security events — a lightweight, append-only feed (account locked,
+    // account disabled, new session, session revoked) that backs the
+    // Security Overview dashboard. Written either directly by the client
+    // at the moment of the actual action (new session, session revoked —
+    // same "has to be immediate" reasoning as sessions above) or by a
+    // Cloud Function using the Admin SDK for actions that already
+    // require one anyway (account locked, account disabled). No update
+    // or delete — it's a log, not a mutable record.
+    // ---------------------------------------------------------------
+    match /securityEvents/{eventId} {
+      allow read: if isSuperAdmin();
+      allow create: if isSignedIn() && request.resource.data.actorId == request.auth.uid;
+    }
+
+    // ---------------------------------------------------------------
+    // Login attempts — written exclusively by the loginSecurity Cloud
+    // Functions (Admin SDK, bypasses this entirely). The only reason a
+    // rule exists here at all is so the Security Overview dashboard can
+    // directly query "how many accounts are currently locked" — Super
+    // Admin only, since this is account-security data, not something
+    // even a hospital admin should be able to browse for other people's
+    // accounts.
+    // ---------------------------------------------------------------
+    match /loginAttempts/{email} {
+      allow read: if isSuperAdmin();
+      // Manual block/unblock from the Security Overview events feed —
+      // writes the SAME shape (failedCount, lockedUntil, lastAttemptAt)
+      // the automatic lock already produces, so nothing downstream needs
+      // to know the difference between "locked by 2 wrong passwords" and
+      // "locked by a Super Admin clicking a button."
+      allow create, update: if isSuperAdmin();
+    }
+  }
+}
