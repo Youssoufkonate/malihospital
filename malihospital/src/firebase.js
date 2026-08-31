@@ -24,7 +24,7 @@ export const functions = getFunctions(app);
 
 const RECAPTCHA_SITE_KEY = "6LcgCYwtAAAAAK2wgW3OI9IOSSprTjSgL0FAjQnB";
 
-if (RECAPTCHA_SITE_KEY && RECAPTCHA_SITE_KEY !== "REPLACE_WITH_YOUR_RECAPTCHA_V3_SITE_KEY") {
+if (false && RECAPTCHA_SITE_KEY && RECAPTCHA_SITE_KEY !== "REPLACE_WITH_YOUR_RECAPTCHA_V3_SITE_KEY") {
   try {
     initializeAppCheck(app, {
       provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
