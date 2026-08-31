@@ -484,7 +484,7 @@ export default function Accueil() {
         // back to the first available department.
         setDept((current) => (current && depts.includes(current) ? current : (depts[0] || "")));
       },
-      (error) => console.error("Error loading hospital departments:", error)
+      (error) => { console.error("Error loading hospital departments:", error); alert("DEBUG departments listener: " + error.code + " - " + error.message); }
     );
   };
 
