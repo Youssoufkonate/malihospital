@@ -469,6 +469,7 @@ export default function Accueil() {
   // Admin adds/renames/removes a department while reception is mid-shift,
   // this screen picks it up immediately instead of needing a re-login.
   const startHospitalListener = (hospitalId) => {
+    alert("DEBUG startHospitalListener CALLED with hospitalId=" + hospitalId);
     if (hospitalUnsubRef.current) {
       hospitalUnsubRef.current();
       hospitalUnsubRef.current = null;
