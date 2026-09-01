@@ -476,6 +476,7 @@ export default function Accueil() {
     hospitalUnsubRef.current = onSnapshot(
       doc(db, "hospitals", hospitalId),
       (snap) => {
+	alert("DEBUG listener fired! exists=" + snap.exists() + " data=" + JSON.stringify(snap.data()));
         if (!snap.exists()) return;
         const depts = snap.data().departments || [];
         setDepartments(depts);
