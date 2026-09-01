@@ -449,6 +449,7 @@ export default function Accueil() {
 
       setUserData(data);
       startTicketsListener(data.hospitalId);
+      alert("DEBUG reached point right after startTicketsListener call");
       startMissedQueueListener(data.hospitalId);
       startHospitalListener(data.hospitalId);
 
