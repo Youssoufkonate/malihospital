@@ -317,6 +317,7 @@ export default function Accueil() {
   const [userData, setUserData] = useState(null);
   const [hospitalName, setHospitalName] = useState("");
   const [pageLoading, setPageLoading] = useState(true);
+  const [successMsg, setSuccessMsg] = useState("");
   // Which queue panel is showing on the right — keeps "Tickets récents" and
   // "File manquée" from both being fully expanded at once, so the page
   // reads as one focused list instead of two stacked ones competing for
@@ -656,7 +657,14 @@ export default function Accueil() {
       resetPatientFlow();
       setPriority("normal");
       setLoading(false);
-      alert(`✅ Ticket créé: ${ticketNumber} (${selectedPatient.patientId})`);
+      // A blocking alert() here was the actual cause of the freeze: it
+      // stalls the whole JS event loop, so printTicket's own pending
+      // print timer would fire while the alert was still open (or right
+      // as it closed) — stacking a native print dialog directly on top
+      // of a just-dismissed alert, which browsers handle very badly.
+      // A non-blocking on-page message avoids that entirely.
+      setSuccessMsg(`✅ Ticket créé: ${ticketNumber} (${selectedPatient.patientId})`);
+      setTimeout(() => setSuccessMsg(""), 4000);
     } catch (e) {
       alert("❌ Erreur de création du ticket: " + e.message);
       setLoading(false);
@@ -666,6 +674,10 @@ export default function Accueil() {
   const printTicket = (ticketData) => {
     const p = PRIORITY_CONFIG[ticketData.priority] || PRIORITY_CONFIG.normal;
     const printWindow = window.open("", "", "height=680,width=420");
+    if (!printWindow) {
+      alert("⚠️ La fenêtre d'impression a été bloquée par le navigateur. Autorisez les pop-ups pour ce site afin d'imprimer les tickets.");
+      return;
+    }
     printWindow.document.write(`
       <html><head><title>Ticket ${ticketData.ticketNumber}</title>
       <style>
@@ -703,7 +715,23 @@ export default function Accueil() {
       </body></html>
     `);
     printWindow.document.close();
-    setTimeout(() => { printWindow.print(); printWindow.close(); }, 250);
+    // Waiting for the browser's own afterprint signal (rather than
+    // guessing with a blind setTimeout) avoids closing the popup while
+    // the native print dialog is still initializing — doing that is a
+    // known cause of the whole tab appearing to freeze until reloaded.
+    // A short fallback timer still closes it if afterprint never fires
+    // (e.g. the user cancels without it triggering in some browsers).
+    let closed = false;
+    const safeClose = () => {
+      if (closed) return;
+      closed = true;
+      try { printWindow.close(); } catch (e) { /* window may already be gone */ }
+    };
+    printWindow.onafterprint = safeClose;
+    setTimeout(() => {
+      try { printWindow.focus(); printWindow.print(); } catch (e) { /* popup may have been closed by the user already */ }
+    }, 250);
+    setTimeout(safeClose, 60000); // fallback in case afterprint never fires
   };
 
   // Brings a "no-show" patient back into the waiting queue. Re-queues them
@@ -756,6 +784,17 @@ export default function Accueil() {
       </div>
 
       <div style={{ maxWidth: 1400, margin: "0 auto", padding: "0 24px" }}>
+
+        {successMsg && (
+          <div style={{
+            position: "fixed", top: 20, left: "50%", transform: "translateX(-50%)", zIndex: 2000,
+            padding: "14px 24px", borderRadius: 8, backgroundColor: COLORS.successBg,
+            color: COLORS.successText, border: "1px solid #BEE3C5", fontWeight: 700, fontSize: 14.5,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+          }}>
+            {successMsg}
+          </div>
+        )}
 
         {/* Official letterhead header — matches Doctor.jsx / AdminPanel.jsx */}
         <div style={{
