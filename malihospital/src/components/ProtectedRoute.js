@@ -17,6 +17,7 @@ export default function ProtectedRoute({ children, roles }) {
         return;
       }
       try {
+	await user.getIdToken(true);
         const snap = await getDoc(doc(db, "users", user.uid));
         if (!snap.exists()) return setStatus("denied");
 
