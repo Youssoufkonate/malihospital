@@ -341,6 +341,7 @@ export default function Accueil() {
 
         const data = userSnap.data();
         setUserData(data);
+	alert("DEBUG reached point right after setUserData");
 
         // Update last login
         await updateDoc(doc(db, "users", auth.currentUser.uid), {
