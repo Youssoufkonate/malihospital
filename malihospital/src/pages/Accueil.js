@@ -401,7 +401,7 @@ export default function Accueil() {
       if (hospitalUnsubRef.current) hospitalUnsubRef.current();
       if (ticketsRefreshIntervalRef.current) clearInterval(ticketsRefreshIntervalRef.current);
     };
-  }, [nav]);
+   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   const checkAuth = async () => {
