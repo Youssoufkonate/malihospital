@@ -1095,6 +1095,7 @@ export default function Accueil() {
                     </div>
 
                     <label style={labelStyle}>Département</label>
+		    <div style={{background: "yellow", padding: 8, fontSize: 11, wordBreak: "break-all"}}>DEBUG departments={JSON.stringify(departments)} hospitalId={userData?.hospitalId}</div>
                     {departments.length === 0 ? (
                       <div style={{ padding: 12, marginBottom: 14, backgroundColor: COLORS.dangerBg, border: `1px solid #F1C3C9`, borderRadius: 8, color: COLORS.dangerText, fontSize: 13, fontWeight: 600 }}>
                         ⚠️ Aucun département configuré. Contactez votre administrateur.
