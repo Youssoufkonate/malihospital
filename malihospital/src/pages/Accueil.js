@@ -328,69 +328,18 @@ export default function Accueil() {
   const hospitalUnsubRef = useRef(null);
   const ticketsRefreshIntervalRef = useRef(null);
 
+  // NOTE: this used to contain a second, duplicate useEffect with its own
+  // LOCAL loadUserData/loadTickets/checkAuth defined inline. Because that
+  // inner `checkAuth` was what onAuthStateChanged actually called (JS
+  // closures resolve to the nearest enclosing declaration), it silently
+  // shadowed the real, complete checkAuth/loadUserData below — which have
+  // the hospital/department listener, missed-queue listener, and every
+  // other piece of this page's real logic. That inner block never did
+  // anything with departments at all, which is why departments always
+  // showed empty: the code that actually ran had no department logic in
+  // it whatsoever. Removed entirely; this effect now just wires
+  // onAuthStateChanged to the one real checkAuth defined further down.
   useEffect(() => {
-    const loadUserData = async () => {
-      try {
-        const userSnap = await getDoc(doc(db, "users", auth.currentUser.uid));
-        if (!userSnap.exists()) {
-          alert("❌ Données utilisateur introuvables. Veuillez vous réinscrire.");
-          await signOut(auth);
-          nav("/");
-          return;
-        }
-
-        const data = userSnap.data();
-        setUserData(data);
-	alert("DEBUG reached point right after setUserData");
-
-        // Update last login
-        await updateDoc(doc(db, "users", auth.currentUser.uid), {
-          lastLoginAt: new Date().toISOString()
-        });
-
-        // Check if disabled
-        if (data.disabled) {
-          alert("❌ Votre compte a été désactivé. Contactez l'administrateur.");
-          await signOut(auth);
-          nav("/");
-          return;
-        }
-
-        if (!data.approved) return;
-
-        if (data.role !== "accueil") {
-          alert("❌ Accès refusé.");
-          await signOut(auth);
-          nav("/");
-          return;
-        }
-
-        loadTickets();
-      } catch (e) {
-        alert("Erreur de chargement des données: " + e.message);
-      }
-    };
-
-    const loadTickets = () => {
-      const q = query(collection(db, "tickets"), orderBy("createdAt", "desc"));
-      onSnapshot(q, snapshot => {
-        const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        // Filter tickets from last 24 hours
-        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        const recentTickets = list.filter(t => new Date(t.createdAt) > twentyFourHoursAgo);
-        setTickets(recentTickets);
-      });
-    };
-
-    const checkAuth = async () => {
-      if (!auth.currentUser) {
-        nav("/");
-        return;
-      }
-      await loadUserData();
-      setPageLoading(false);
-    };
-
     const unsubscribe = auth.onAuthStateChanged((user) => {
       if (user) checkAuth();
       else nav("/");
@@ -402,8 +351,8 @@ export default function Accueil() {
       if (hospitalUnsubRef.current) hospitalUnsubRef.current();
       if (ticketsRefreshIntervalRef.current) clearInterval(ticketsRefreshIntervalRef.current);
     };
-   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const checkAuth = async () => {
     if (!auth.currentUser) return nav("/");
@@ -449,7 +398,6 @@ export default function Accueil() {
 
       setUserData(data);
       startTicketsListener(data.hospitalId);
-      alert("DEBUG reached point right after startTicketsListener call");
       startMissedQueueListener(data.hospitalId);
       startHospitalListener(data.hospitalId);
 
@@ -471,7 +419,6 @@ export default function Accueil() {
   // Admin adds/renames/removes a department while reception is mid-shift,
   // this screen picks it up immediately instead of needing a re-login.
   const startHospitalListener = (hospitalId) => {
-    alert("DEBUG startHospitalListener CALLED with hospitalId=" + hospitalId);
     if (hospitalUnsubRef.current) {
       hospitalUnsubRef.current();
       hospitalUnsubRef.current = null;
