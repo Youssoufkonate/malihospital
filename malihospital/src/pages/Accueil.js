@@ -476,7 +476,7 @@ export default function Accueil() {
     hospitalUnsubRef.current = onSnapshot(
       doc(db, "hospitals", hospitalId),
       (snap) => {
-	alert("DEBUG listener fired! exists=" + snap.exists() + " data=" + JSON.stringify(snap.data()));
+	
         if (!snap.exists()) return;
         const depts = snap.data().departments || [];
         setDepartments(depts);
@@ -485,7 +485,7 @@ export default function Accueil() {
         // back to the first available department.
         setDept((current) => (current && depts.includes(current) ? current : (depts[0] || "")));
       },
-      (error) => { console.error("Error loading hospital departments:", error); alert("DEBUG departments listener: " + error.code + " - " + error.message); }
+      (error) => { console.error("Error loading hospital departments:", error); }
     );
   };
 
@@ -1096,7 +1096,7 @@ export default function Accueil() {
                     </div>
 
                     <label style={labelStyle}>Département</label>
-		    <div style={{background: "yellow", padding: 8, fontSize: 11, wordBreak: "break-all"}}>DEBUG departments={JSON.stringify(departments)} hospitalId={userData?.hospitalId}</div>
+		    
                     {departments.length === 0 ? (
                       <div style={{ padding: 12, marginBottom: 14, backgroundColor: COLORS.dangerBg, border: `1px solid #F1C3C9`, borderRadius: 8, color: COLORS.dangerText, fontSize: 13, fontWeight: 600 }}>
                         ⚠️ Aucun département configuré. Contactez votre administrateur.
