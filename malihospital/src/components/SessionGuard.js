@@ -410,7 +410,6 @@ export default function SessionGuard({ children }) {
 
     let ownDeviceSnap;
     try {
-      await user.getIdToken(true);
       ownDeviceSnap = await getDoc(doc(db, "devices", deviceId));
     } catch (e) {
       // Fail OPEN, not closed — a transient read error shouldn't lock

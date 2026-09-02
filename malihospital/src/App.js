@@ -8,14 +8,17 @@ import Doctor from "./pages/Doctor";
 import Nurse from "./pages/Nurse";
 import Supervisor from "./pages/Supervisor";
 import Pharmacy from "./pages/Pharmacy";
+import Lab from "./pages/Lab";
 import FacilityAdmin from "./pages/FacilityAdmin";
 import WaitingRoom from "./pages/WaitingRoom";
 import ProtectedRoute from "./components/ProtectedRoute";
 import SessionGuard from "./components/SessionGuard";
+import DeviceGate from "./components/DeviceGate";
 
 export default function App() {
   return (
     <BrowserRouter>
+    <DeviceGate>
       {/* SessionGuard only arms its 2-hour idle timer once Firebase
           reports a signed-in user, so it's safe to wrap everything
           here (including the public Login/Signup/WaitingRoom routes)
@@ -93,6 +96,15 @@ export default function App() {
           />
 
           <Route
+            path="/lab"
+            element={
+              <ProtectedRoute roles={["lab"]}>
+                <Lab />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
             path="/facility-admin"
             element={
               <ProtectedRoute roles={["facilityadmin"]}>
@@ -106,6 +118,7 @@ export default function App() {
           <Route path="/waiting/:hospitalId" element={<WaitingRoom />} />
         </Routes>
       </SessionGuard>
+    </DeviceGate>
     </BrowserRouter>
   );
 }

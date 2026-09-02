@@ -11,6 +11,7 @@ import { httpsCallable } from "firebase/functions";
 import { signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import NotificationsBanner from "../components/NotificationsBanner";
+import HamburgerMenu from "../components/HamburgerMenu";
 
 /* ------------------------------------------------------------------ */
 /*  Design tokens — Republic of Mali institutional palette             */
@@ -1285,55 +1286,18 @@ export default function AdminPanel() {
           </div>
         )}
 
-        {/* Section tabs — compact pill nav, scrolls horizontally instead of wrapping */}
-        <div style={{
-          display: "flex", gap: 3, marginTop: 22, marginBottom: 4,
-          backgroundColor: COLORS.card, padding: 4, borderRadius: 10,
-          border: `1px solid ${COLORS.line}`, overflowX: "auto",
-          scrollbarWidth: "thin",
-        }}>
-          {TABS.map((tab) => {
-            const isActive = activeTab === tab.key;
-            const showWarning = typeof tab.warn === "function" && tab.warn(departments.length);
-            const badgeCount = tab.key === "devices" ? pendingDevices.length : 0;
-            return (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
-                  padding: "8px 13px", border: "none", borderRadius: 7, cursor: "pointer",
-                  fontSize: 12.5, fontWeight: isActive ? 700 : 500, whiteSpace: "nowrap",
-                  color: isActive ? "#fff" : COLORS.slate,
-                  backgroundColor: isActive ? COLORS.green : "transparent",
-                  fontFamily: FONT_BODY, transition: "background-color 0.15s, color 0.15s",
-                }}
-                onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.backgroundColor = COLORS.paper; }}
-                onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.backgroundColor = "transparent"; }}
-              >
-                <span style={{ fontSize: 13 }}>{tab.icon}</span>
-                {tab.label}
-                {showWarning && (
-                  <span style={{
-                    width: 6, height: 6, borderRadius: "50%",
-                    backgroundColor: isActive ? "#fff" : COLORS.red,
-                    display: "inline-block", marginLeft: 1,
-                  }} />
-                )}
-                {badgeCount > 0 && (
-                  <span style={{
-                    display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    minWidth: 17, height: 17, padding: "0 5px", borderRadius: 9,
-                    backgroundColor: isActive ? "#fff" : COLORS.red,
-                    color: isActive ? COLORS.green : "#fff",
-                    fontSize: 10, fontWeight: 700,
-                  }}>
-                    {badgeCount}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+        {/* Navigation menu */}
+        <div style={{ marginTop: 22, marginBottom: 4 }}>
+          <HamburgerMenu
+            tabs={TABS}
+            activeTab={activeTab}
+            onSelect={setActiveTab}
+            getBadge={(tab) => ({
+              count: tab.key === "devices" ? pendingDevices.length : 0,
+              warn: typeof tab.warn === "function" && tab.warn(departments.length),
+            })}
+            colors={COLORS}
+          />
         </div>
 
         <div style={{ padding: "28px 0 50px 0" }}>

@@ -22,6 +22,7 @@ import { httpsCallable } from "firebase/functions";
 import { signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import NotificationsBanner from "../components/NotificationsBanner";
+import HamburgerMenu from "../components/HamburgerMenu";
 import { VILLES } from "../constants/villes";
 import { PHARMACIES_SEED } from "../constants/pharmaciesSeed";
 
@@ -1060,42 +1061,15 @@ export default function SuperAdmin() {
           </div>
         </div>
 
-        <div style={{ maxWidth: 1300, margin: "0 auto", padding: "0 24px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-          {TABS.map((tab) => {
-            const isActive = activeTab === tab.key;
-            const badge = tabBadges[tab.key];
-            return (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                style={{
-                  padding: "13px 18px",
-                  background: "none",
-                  border: "none",
-                  borderBottom: isActive ? `3px solid ${COLORS.gold}` : "3px solid transparent",
-                  color: isActive ? "#fff" : "rgba(255,255,255,0.55)",
-                  fontWeight: isActive ? 700 : 600,
-                  fontSize: 13.5,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {tab.label}
-                {badge ? (
-                  <span style={{
-                    display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    minWidth: 18, height: 18, padding: "0 5px", borderRadius: 9,
-                    backgroundColor: COLORS.red, color: "#fff", fontSize: 10.5, fontWeight: 700,
-                  }}>
-                    {badge}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
+        <div style={{ maxWidth: 1300, margin: "0 auto", padding: "14px 24px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+          <HamburgerMenu
+            tabs={TABS}
+            activeTab={activeTab}
+            onSelect={setActiveTab}
+            getBadge={(tab) => ({ count: tabBadges[tab.key] || 0 })}
+            colors={COLORS}
+            dark
+          />
         </div>
       </div>
 
