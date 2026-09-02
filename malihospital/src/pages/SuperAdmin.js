@@ -166,6 +166,7 @@ export default function SuperAdmin() {
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -2107,6 +2108,13 @@ export default function SuperAdmin() {
             text: pharmacyImportText, setText: setPharmacyImportText,
             preview: pharmacyImportPreview, parse: parsePharmacyImport, submit: submitPharmacyImport,
             importing: importingPharmacyBulk,
+          },
+          {
+            type: "lab", title: "Import en masse — Laboratoires", accent: "#2E5C8C",
+            open: labImportOpen, setOpen: setLabImportOpen,
+            text: labImportText, setText: setLabImportText,
+            preview: labImportPreview, parse: parseLabImport, submit: submitLabImport,
+            importing: importingLabBulk,
           },
         ].map((imp) => (
           <div key={imp.type} style={{
