@@ -90,6 +90,7 @@ export default function Supervisor() {
       if (staffUnsubRef.current) staffUnsubRef.current();
       if (scheduleUnsubRef.current) scheduleUnsubRef.current();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
 
   const checkAuthAndLoad = async () => {
@@ -287,6 +288,7 @@ export default function Supervisor() {
     }
   };
 
+  // Live-updates whenever the selected date changes, so the supervisor
   // sees the current state of a day's roster in real time (e.g. if they
   // have this page open in two tabs, or another supervisor covers for
   // them — though write access stays locked to this exact department).
@@ -314,11 +316,12 @@ export default function Supervisor() {
   }, [userData?.hospitalId, userData?.department, scheduleDate]);
 
   // Auto-expiry without a scheduled Cloud Function (see conversation notes
-  // — the v2 scheduler trigger crashes every function's container in this
-  // environment). Runs opportunistically whenever a supervisor's dashboard
-  // loads: deletes their OWN department's past-dated schedule entries once
-  // they've aged past the retention window for whatever cadence created
-  // them (daily=24h, weekly=7d, monthly=30d after the entry's own date).
+  // — the v2 scheduler trigger crashes every function's shared container in
+  // this environment). Runs opportunistically whenever a supervisor's
+  // dashboard loads: deletes their OWN department's past-dated schedule
+  // entries once they've aged past the retention window for whatever
+  // cadence created them (daily=24h, weekly=7d, monthly=30d after the
+  // entry's own date).
   // Honest limitation: a department nobody visits for a while just
   // accumulates old entries until someone does — there's no background
   // job. Best-effort and silent on failure; this must never block the
@@ -592,8 +595,6 @@ export default function Supervisor() {
 
   const activeQueueCount = tickets.filter((t) => ["waiting", "ready", "in-progress"].includes(t.status)).length;
   const completedCount = tickets.filter((t) => t.status === "completed").length;
-  const doctors = staff.filter((s) => s.role === "doctor");
-  const nurses = staff.filter((s) => s.role === "nurse");
 
   return (
     <div style={{ minHeight: "100vh", background: COLORS.paper, fontFamily: FONT_BODY }}>
@@ -1017,6 +1018,48 @@ export default function Supervisor() {
           République du Mali — Ministère de la Santé · Système de gestion hospitalière
         </div>
       </div>
+
+      {/* Staff schedule modal — the piece that was missing: openStaffSchedule()
+          was already loading this data on click, but nothing ever displayed
+          it. Shows every upcoming shift for the selected staff member. */}
+      {viewingStaffSchedule && (
+        <div
+          onClick={closeStaffSchedule}
+          style={{ position: "fixed", inset: 0, backgroundColor: "rgba(27,42,31,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, zIndex: 1000 }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "#fff", borderRadius: 14, width: "min(520px, 100%)", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.35)", borderTop: "6px solid #2E5C8C" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "22px 28px 18px", borderBottom: `1px solid ${COLORS.line}` }}>
+              <h2 style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 19, color: COLORS.ink }}>
+                Planning — {viewingStaffSchedule.role === "doctor" ? "Dr. " : ""}{viewingStaffSchedule.firstName} {viewingStaffSchedule.lastName}
+              </h2>
+              <button onClick={closeStaffSchedule} aria-label="Fermer" style={{ width: 34, height: 34, borderRadius: "50%", border: "none", backgroundColor: COLORS.paper, color: COLORS.ink, fontSize: 17, fontWeight: 700, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ padding: "20px 28px 26px" }}>
+              {staffScheduleLoading ? (
+                <p style={{ color: COLORS.slate, fontSize: 14 }}>Chargement…</p>
+              ) : staffScheduleEntries.length === 0 ? (
+                <div style={{ padding: 28, backgroundColor: COLORS.paper, borderRadius: 8, textAlign: "center", color: COLORS.slate, fontSize: 13.5 }}>
+                  Aucun horaire à venir pour ce membre du personnel.
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {staffScheduleEntries.map((s) => (
+                    <div key={s.id} style={{ padding: "14px 16px", backgroundColor: COLORS.paper, borderRadius: 8, border: `1px solid ${COLORS.line}` }}>
+                      <div style={{ fontWeight: 700, color: COLORS.ink, fontSize: 14 }}>
+                        {new Date(s.date + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}
+                      </div>
+                      <div style={{ fontSize: 13, color: COLORS.slate, marginTop: 3 }}>
+                        {s.shiftStart} – {s.shiftEnd}{s.notes ? ` · ${s.notes}` : ""}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {showChangePassword && (
         <ChangePassword onClose={() => setShowChangePassword(false)} />
       )}
