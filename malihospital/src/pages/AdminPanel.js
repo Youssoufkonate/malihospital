@@ -649,7 +649,7 @@ export default function AdminPanel() {
   const revokeStaffSession = async (sessionId) => {
     setRevokingStaffSession(sessionId);
     try {
-      await updateDoc(doc(db, "sessions", sessionId), { revoked: true, revokedAt: new Date().toISOString(), revokedBy: currentUser.uid });
+      await updateDoc(doc(db, "sessions", sessionId), { revoked: true, revokedAt: new Date().toISOString(), revokedBy: auth.currentUser.uid });
     } catch (e) {
       setMsg("❌ Erreur: " + e.message);
     }
@@ -662,7 +662,7 @@ export default function AdminPanel() {
     try {
       const batch = writeBatch(db);
       staffSessions.forEach((s) => {
-        batch.update(doc(db, "sessions", s.id), { revoked: true, revokedAt: new Date().toISOString(), revokedBy: currentUser.uid });
+        batch.update(doc(db, "sessions", s.id), { revoked: true, revokedAt: new Date().toISOString(), revokedBy: auth.currentUser.uid });
       });
       await batch.commit();
     } catch (e) {
@@ -737,7 +737,7 @@ export default function AdminPanel() {
   const approvePendingDevice = async (device) => {
     setApprovingPendingId(device.id);
     try {
-      await updateDoc(doc(db, "devices", device.id), { status: "active", approvedAt: new Date().toISOString(), approvedBy: currentUser.uid });
+      await updateDoc(doc(db, "devices", device.id), { status: "active", approvedAt: new Date().toISOString(), approvedBy: auth.currentUser.uid });
     } catch (e) {
       setMsg("❌ Erreur: " + e.message);
     }
@@ -747,7 +747,7 @@ export default function AdminPanel() {
   const denyPendingDevice = async (device) => {
     setApprovingPendingId(device.id);
     try {
-      await updateDoc(doc(db, "devices", device.id), { status: "revoked", revokedAt: new Date().toISOString(), revokedBy: currentUser.uid });
+      await updateDoc(doc(db, "devices", device.id), { status: "revoked", revokedAt: new Date().toISOString(), revokedBy: auth.currentUser.uid });
     } catch (e) {
       setMsg("❌ Erreur: " + e.message);
     }
@@ -761,7 +761,7 @@ export default function AdminPanel() {
     if (!window.confirm(`Révoquer l'appareil de ${device.userName || device.userEmail} ? Il/elle ne pourra plus se connecter depuis cet appareil.`)) return;
     setRevokingActiveDeviceId(device.id);
     try {
-      await updateDoc(doc(db, "devices", device.id), { status: "revoked", revokedAt: new Date().toISOString(), revokedBy: currentUser.uid });
+      await updateDoc(doc(db, "devices", device.id), { status: "revoked", revokedAt: new Date().toISOString(), revokedBy: auth.currentUser.uid });
     } catch (e) {
       setMsg("❌ Erreur: " + e.message);
     }
@@ -772,7 +772,7 @@ export default function AdminPanel() {
     if (!staffDevice) return;
     setRevokingDevice(true);
     try {
-      await updateDoc(doc(db, "devices", staffDevice.id), { status: "active", approvedAt: new Date().toISOString(), approvedBy: currentUser.uid });
+      await updateDoc(doc(db, "devices", staffDevice.id), { status: "active", approvedAt: new Date().toISOString(), approvedBy: auth.currentUser.uid });
     } catch (e) {
       setMsg("❌ Erreur: " + e.message);
     }
@@ -784,7 +784,7 @@ export default function AdminPanel() {
     if (!window.confirm(`Révoquer l'appareil de ${staffSessionsFor.firstName} ${staffSessionsFor.lastName} ? Il/elle ne pourra plus se connecter depuis cet appareil.`)) return;
     setRevokingDevice(true);
     try {
-      await updateDoc(doc(db, "devices", staffDevice.id), { status: "revoked", revokedAt: new Date().toISOString(), revokedBy: currentUser.uid });
+      await updateDoc(doc(db, "devices", staffDevice.id), { status: "revoked", revokedAt: new Date().toISOString(), revokedBy: auth.currentUser.uid });
     } catch (e) {
       setMsg("❌ Erreur: " + e.message);
     }

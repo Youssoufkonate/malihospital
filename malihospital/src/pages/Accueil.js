@@ -675,7 +675,10 @@ export default function Accueil() {
     const p = PRIORITY_CONFIG[ticketData.priority] || PRIORITY_CONFIG.normal;
     const printWindow = window.open("", "", "height=680,width=420");
     if (!printWindow) {
-      alert("⚠️ La fenêtre d'impression a été bloquée par le navigateur. Autorisez les pop-ups pour ce site afin d'imprimer les tickets.");
+      // Silently skip printing if the browser blocks the popup — the
+      // ticket itself was already created successfully at this point,
+      // so there's nothing to interrupt the user about.
+      console.warn("Print window was blocked by the browser; skipping print.");
       return;
     }
     printWindow.document.write(`
@@ -1046,7 +1049,10 @@ export default function Accueil() {
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                       <div>
                         <label style={labelStyle}>Groupe sanguin (optionnel)</label>
-                        <input className="ac-input" placeholder="ex: O+" value={newPatientForm.bloodType} onChange={(e) => setNewPatientForm({ ...newPatientForm, bloodType: e.target.value })} disabled={registeringPatient} />
+                        <select className="ac-input" value={newPatientForm.bloodType} onChange={(e) => setNewPatientForm({ ...newPatientForm, bloodType: e.target.value })} disabled={registeringPatient}>
+                          <option value="">Sélectionner…</option>
+                          {["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"].map((bt) => (<option key={bt} value={bt}>{bt}</option>))}
+                        </select>
                       </div>
                       <div>
                         <label style={labelStyle}>Allergies (optionnel)</label>
