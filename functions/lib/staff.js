@@ -57,6 +57,11 @@ exports.createStaffAccount = onCall(async (request) => {
     if (e.code === "auth/email-already-exists") {
       throw new HttpsError("already-exists", "Cet email est déjà utilisé.");
     }
+    // Logged here specifically because translateAuthError() only returns a
+    // clean, French, non-technical message to the client — without this,
+    // the real e.code/e.message (the only way to know WHY account creation
+    // actually failed) is lost, visible nowhere at all.
+    console.error("createStaffAccount: admin.auth().createUser() failed:", e.code, e.message);
     throw new HttpsError("internal", translateAuthError(e));
   }
 
