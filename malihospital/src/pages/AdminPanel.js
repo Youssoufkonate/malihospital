@@ -112,6 +112,7 @@ export default function AdminPanel() {
   const [staffDevice, setStaffDevice] = useState(null);
   const [revokingDevice, setRevokingDevice] = useState(false);
   const [pendingDevices, setPendingDevices] = useState([]);
+  const [refreshingDevices, setRefreshingDevices] = useState(false);
   const [approvingPendingId, setApprovingPendingId] = useState(null);
   const [activeDevices, setActiveDevices] = useState([]);
   const [revokingActiveDeviceId, setRevokingActiveDeviceId] = useState(null);
@@ -713,7 +714,32 @@ export default function AdminPanel() {
     return () => unsub();
   }, [currentUser?.hospitalId]);
 
-  // Already-approved devices for this hospital's staff — shown alongside
+  // Manual one-time re-fetch for the "🔄 Actualiser" button — a safety
+  // net for the live listener above. The listener itself is correctly
+  // wired (matches on hospitalId + status exactly as devices are
+  // written), so a device not appearing immediately is virtually always
+  // normal network latency or the browser throttling an inactive tab,
+  // not a real bug — but giving the admin an immediate way to force a
+  // check costs nothing and removes any doubt in the moment.
+  const refreshPendingDevices = async () => {
+    if (!currentUser?.hospitalId) return;
+    setRefreshingDevices(true);
+    try {
+      const snap = await getDocs(query(
+        collection(db, "devices"),
+        where("hospitalId", "==", currentUser.hospitalId),
+        where("status", "==", "pending")
+      ));
+      const list = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((d) => d.role !== "hospitaladmin");
+      list.sort((a, b) => new Date(a.registeredAt) - new Date(b.registeredAt));
+      setPendingDevices(list);
+    } catch (e) {
+      console.error("Error refreshing pending devices:", e);
+    }
+    setRefreshingDevices(false);
+  };
   // the pending list in the Appareils tab so approving and revoking live
   // in the same place, matching the pattern used in Super Admin's own
   // Appareils tab.
@@ -1377,8 +1403,21 @@ export default function AdminPanel() {
                 gérés depuis cette page — leurs demandes sont approuvées uniquement par le Super Admin.
               </p>
 
-              <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.slate, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>
-                🔔 Demandes en attente {pendingDevices.length > 0 && `(${pendingDevices.length})`}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.slate, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                  🔔 Demandes en attente {pendingDevices.length > 0 && `(${pendingDevices.length})`}
+                </div>
+                <button
+                  onClick={refreshPendingDevices}
+                  disabled={refreshingDevices}
+                  title="Si un nouvel appareil n'apparaît pas immédiatement, cliquez ici pour forcer une vérification"
+                  style={{
+                    background: "none", border: `1px solid ${COLORS.line}`, borderRadius: 6, padding: "5px 10px",
+                    color: COLORS.slate, fontSize: 12, fontWeight: 600, cursor: refreshingDevices ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {refreshingDevices ? "…" : "🔄 Actualiser"}
+                </button>
               </div>
 
               {pendingDevices.length === 0 ? (
