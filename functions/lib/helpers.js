@@ -100,18 +100,56 @@ function isLockActive(ticket) {
  * imports). Not a substitute for infrastructure-level protection (Cloud
  * Armor, App Check) against a genuinely distributed attack — this is
  * deliberately lightweight, meant to stop one caller from hammering a
- * single sensitive endpoint, using a doc per (action, identity) pair with
- * a rolling window.
+ * single sensitive endpoint, using a doc per (action, identity) pair.
+ *
+ * Two modes:
+ * - Rolling window (default, when lockoutMs is omitted): calls older than
+ *   windowMs age out individually — used for things like password reset
+ *   requests, where a slow, forgiving limit is appropriate.
+ * - Fixed lockout (when lockoutMs is provided): a simple attempt counter.
+ *   Once it reaches maxCalls, every call is rejected until lockoutMs has
+ *   passed since the LAST attempt during the lockout, at which point the
+ *   counter resets to 0 and normal attempts resume. This is a shorter,
+ *   sharper cooldown for actions where a legitimate user might
+ *   momentarily need several tries in a row (e.g. onboarding several
+ *   staff members back-to-back) and a full rolling hour is needlessly harsh.
  *
  * @param {string} action - a short name for what's being limited, e.g. "createStaffAccount"
  * @param {string} identity - who's being limited, usually caller.uid
- * @param {number} maxCalls - how many calls are allowed within the window
- * @param {number} windowMs - the rolling window size in milliseconds
+ * @param {number} maxCalls - how many calls are allowed before limiting kicks in
+ * @param {number} windowMs - the rolling window size in milliseconds (rolling-window mode)
+ * @param {number} [lockoutMs] - if provided, switches to fixed-lockout mode with this cooldown
  */
-async function checkRateLimit(action, identity, maxCalls, windowMs) {
+async function checkRateLimit(action, identity, maxCalls, windowMs, lockoutMs) {
   const key = `${action}_${identity}`;
   const ref = admin.firestore().collection("rateLimits").doc(key);
   const now = Date.now();
+
+  if (lockoutMs) {
+    await admin.firestore().runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const data = snap.exists ? snap.data() : { attempts: 0, lastAttemptAt: 0 };
+      const timeSinceLast = now - (data.lastAttemptAt || 0);
+
+      // Once locked, every attempt just re-triggers the same message until
+      // lockoutMs has actually elapsed since the most recent attempt —
+      // trying again during the lockout doesn't extend it further.
+      if (data.attempts >= maxCalls && timeSinceLast < lockoutMs) {
+        const waitSec = Math.ceil((lockoutMs - timeSinceLast) / 1000);
+        throw new HttpsError(
+          "resource-exhausted",
+          `Trop de tentatives pour cette action. Réessayez dans ${waitSec} seconde${waitSec > 1 ? "s" : ""}.`
+        );
+      }
+
+      // Lockout has expired (or never triggered) — reset to 0 and count
+      // this as attempt #1, exactly as requested: 10 attempts, then a
+      // fixed cooldown, then back to a clean slate.
+      const attempts = (data.attempts >= maxCalls) ? 1 : (data.attempts || 0) + 1;
+      tx.set(ref, { attempts, lastAttemptAt: now }, { merge: true });
+    });
+    return;
+  }
 
   await admin.firestore().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
