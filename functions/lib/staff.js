@@ -19,7 +19,7 @@ const DEPARTMENT_SCOPED_ROLES = ["doctor", "nurse", "supervisor"];
 exports.createStaffAccount = onCall(async (request) => {
   const caller = await getCallerProfile(request);
   requireRole(caller, ["hospitaladmin", "superadmin"]);
-  await checkRateLimit("createStaffAccount", caller.uid, 10, 60 * 60 * 1000); // 10/hour — normal onboarding pace, well above what a legitimate admin would ever need in one sitting
+  await checkRateLimit("createStaffAccount", caller.uid, 10, 60 * 60 * 1000, 30 * 1000); // 10 attempts, then a 30s cooldown, then resets to 0
 
   const { firstName, lastName, email, password, role, hospitalId, department, room } = request.data || {};
 

@@ -323,6 +323,7 @@ export default function Accueil() {
   // reads as one focused list instead of two stacked ones competing for
   // attention (and scroll space) at the same time.
   const [queueTab, setQueueTab] = useState("recent"); // recent | missed
+  const [ticketSearchQuery, setTicketSearchQuery] = useState("");
   const nav = useNavigate();
   const ticketsUnsubRef = useRef(null);
   const missedUnsubRef = useRef(null);
@@ -774,7 +775,13 @@ export default function Accueil() {
   // Excludes no-shows from the "recent tickets" display — those are shown
   // separately via the dedicated missedTickets state (its own listener,
   // not bounded by the same 24h-since-creation window as `tickets`).
-  const recentTickets = tickets.filter((t) => t.status !== "no-show");
+  const recentTickets = tickets
+    .filter((t) => t.status !== "no-show")
+    .filter((t) => {
+      if (!ticketSearchQuery.trim()) return true;
+      const query = ticketSearchQuery.trim().toLowerCase();
+      return (t.ticketNumber || "").toLowerCase().includes(query);
+    });
 
   return (
     <div className="ac-page">
@@ -1155,8 +1162,23 @@ export default function Accueil() {
               </div>
 
               {queueTab === "recent" && (
+                <input
+                  type="text"
+                  placeholder="🔍 Rechercher par numéro de ticket…"
+                  value={ticketSearchQuery}
+                  onChange={(e) => setTicketSearchQuery(e.target.value)}
+                  style={{
+                    width: "100%", padding: "10px 14px", marginTop: 12, marginBottom: 4,
+                    borderRadius: 8, border: `1.5px solid ${COLORS.line}`, fontSize: 14,
+                    boxSizing: "border-box", fontFamily: FONT_BODY, color: COLORS.ink,
+                    backgroundColor: "#fff",
+                  }}
+                />
+              )}
+
+              {queueTab === "recent" && (
                 recentTickets.length === 0 ? (
-                  <EmptyState text="Rien pour l'instant — les tickets créés apparaîtront ici." />
+                  <EmptyState text={ticketSearchQuery.trim() ? `Aucun ticket ne correspond à "${ticketSearchQuery.trim()}".` : "Rien pour l'instant — les tickets créés apparaîtront ici."} />
                 ) : (
                   <div style={{ display: "grid", gap: 12, marginBottom: 40 }}>
                     {recentTickets.map((t) => {
